@@ -8,6 +8,8 @@ import numpy as np
 from matplotlib.patches import Circle
 import matplotlib.dates as mdates
 import random
+from typing import Literal, Union, Dict, List, Tuple
+
 
 
 MAP_SIZE = 100
@@ -93,21 +95,30 @@ def plot_agent_value(final_workers):
 
 
 class Worker:
-    def __init__(self, i, pose, sleep_time):
-        self.id = i
-        self.name = f"Agent_{i}"
-        self.msg_buffer = []
-        self.value = i
-        self.pose = pose
-        self.time_list = []
+    def __init__(self, 
+                    id:int, 
+                    pose:np.array, 
+                    sleep_time:float,
+                ):
+        self.id             = id
+        self.name           = f"Agent_{id}"
+        self.msg_buffer     = []
+        self.value          = id
+        self.pose           = pose
+        self.time_list      = []
         self.comm_iter_list = []
-        self.sleep_time = sleep_time
+        self.sleep_time     = sleep_time
         
-    def send_data(self, msgs, queues, name_list, comm_alive_dict):
+    def send_data(self, 
+            msgs:int,
+            worker_name_peer_2_queues__share:Dict[Tuple[str,str], Queue], 
+            name_list:List, 
+            worker_name_peer_2_comm_alive__share:Dict[Tuple[str,str],bool], 
+            ):
         # 发送数据到其他进程
         for name in name_list:
-            if name != self.name and comm_alive_dict[(self.name, name)]: # 通信状态为 True
-                queue = queues[(self.name, name)]
+            if name != self.name and worker_name_peer_2_comm_alive__share[(self.name, name)]: # 通信状态为 True
+                queue = worker_name_peer_2_queues__share[(self.name, name)]
                 try:
                     # while not queue.empty():
                         # queue.get_nowait()
@@ -115,12 +126,16 @@ class Worker:
                 except OSError:
                     print(f"Process {self.name} failed to send message to {name}")
                 
-    def receive_data(self, queues, name_list, comm_alive_dict):
+    def receive_data(self, 
+            worker_name_peer_2_queues__share:Dict[Tuple[str,str], Queue], 
+            name_list:List, 
+            worker_name_peer_2_comm_alive__share:Dict[Tuple[str,str],bool],
+            ):
         self.msg_buffer.clear()
         # 接收数据
         for name in name_list:
-            if name != self.name and comm_alive_dict[(name, self.name)]:
-                queue = queues[(name, self.name)]
+            if name != self.name and worker_name_peer_2_comm_alive__share[(name, self.name)]:
+                queue = worker_name_peer_2_queues__share[(name, self.name)]
                 try:
                     received_msg = []
                     while not queue.empty():
@@ -137,52 +152,74 @@ class Worker:
                     
     def consensus(self): #  find the max value 
         if len(self.msg_buffer) > 0:
-            self.value = max(max(self.msg_buffer), self.value)
+            self.value = max(
+                max(self.msg_buffer), 
+                self.value
+            )
             time.sleep(self.sleep_time)
     
-    def send(self):
-        for sender, receiver in comm_alive_dict.keys():
-            if sender == self.name and comm_alive_dict[(sender,receiver)]:
-                wifi[receiver].append(self.value)
+    # def send(self):
+    #     for sender, receiver in comm_alive_dict.keys():
+    #         if sender == self.name and comm_alive_dict[(sender,receiver)]:
+    #             wifi[receiver].append(self.value)
                 
-    def receive(self):
-        self.msg_buffer = []
-        self.msg_buffer.extend(wifi[self.name])
+    # def receive(self):
+    #     self.msg_buffer = []
+    #     self.msg_buffer.extend(wifi[self.name])
         
-    def cons(self, start_cal_time): #  find the max value 
-        if len(self.msg_buffer) > 0:
-            self.value = max(max(self.msg_buffer), self.value)
-            self.comm_iter_list.append(self.value)
-            time.sleep(self.sleep_time)
-            end_cal_time = datetime.datetime.now()
-            self.time_list.append((end_cal_time-start_cal_time).total_seconds())
+    # def cons(self, start_cal_time): #  find the max value 
+    #     if len(self.msg_buffer) > 0:
+    #         self.value = max(max(self.msg_buffer), self.value)
+    #         self.comm_iter_list.append(self.value)
+    #         time.sleep(self.sleep_time)
+    #         end_cal_time = datetime.datetime.now()
+    #         self.time_list.append((end_cal_time-start_cal_time).total_seconds())
 
-def run_worker(worker, queues, name_list, comm_alive_dict, consensus_list, agent_queue, barrier):
+def run_worker(
+            worker:Worker, 
+            worker_name_peer_2_queues__share:Dict[Tuple[str,str], Queue], 
+            name_list:List, 
+            worker_name_peer_2_comm_alive__share:Dict[Tuple[str,str],bool], 
+            consensus_list__share:List, 
+            agent_queue:Queue, 
+            barrier:Barrier,
+        ):
     comm_iter = 0
     # while comm_iter < max_iter:
     start_cal_time = datetime.datetime.now()
     while True:
         # 发送数据
-        worker.send_data(worker.value, queues, name_list, comm_alive_dict)
+        worker.send_data(
+            msgs                                 = worker.value, 
+            worker_name_peer_2_queues__share     = worker_name_peer_2_queues__share, 
+            name_list                            = name_list, 
+            worker_name_peer_2_comm_alive__share = worker_name_peer_2_comm_alive__share,
+        )
 
         # 接收数据
-        worker.receive_data(queues, name_list, comm_alive_dict)
+        worker.receive_data(
+                worker_name_peer_2_queues__share, 
+                name_list, 
+                worker_name_peer_2_comm_alive__share
+            )
         
         barrier.wait()
         # 实现consensus
         worker.consensus()
         if worker.value ==0:
             raise("value")
-        consensus_list[worker.id - 1] = worker.value
+        consensus_list__share[worker.id - 1] = worker.value
         worker.comm_iter_list.append(worker.value)
         
         
         # 打印接收到的数据
-        print(f"Worker {worker.name}, comm_iter: {comm_iter}, consensus value: {consensus_list}\n")
+        print(f"Worker {worker.name}, comm_iter: {comm_iter}, consensus value: {consensus_list__share}\n")
         end_cal_time = datetime.datetime.now()
         worker.time_list.append((end_cal_time - start_cal_time).total_seconds())
-        if len(set(consensus_list)) == 1:
-           break
+        if len(set(consensus_list__share)) == 1:
+            print('len(set(consensus_list__share)) == 1')
+            print('consensus')
+            break
         
         comm_iter += 1
     
@@ -192,32 +229,52 @@ def run_worker(worker, queues, name_list, comm_alive_dict, consensus_list, agent
 def multiprocess_queue():
     
     num_worker = 20
+    num_worker = 5
     np.random.seed(42)
     # sleep_time = [random.randint(1, 5) for _ in range(num_worker)]
     sleep_time = [1, 2, 2, 2, 1, 1, 2, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2]
     print(f"sleep time -------------------- {sleep_time}")
-    workers = [Worker(i+1, pose=np.random.rand(2)*MAP_SIZE, sleep_time=sleep_time[i]) for i in range(num_worker)]
-    queues = {(worker1.name, worker2.name): Queue() for worker1 in workers for worker2 in workers if worker1 != worker2}
-    name_list = [worker.name for worker in workers]
+    workers = [
+        Worker(
+                id=i+1, 
+                pose=np.random.rand(2)*MAP_SIZE, 
+                sleep_time=sleep_time[i]
+            ) 
+        for i in range(num_worker)]
+    worker_name_peer_2_queues__share:Dict[Tuple[str,str], Queue] = {
+            (worker1.name, worker2.name): Queue() 
+            for worker1 in workers 
+            for worker2 in workers 
+            if worker1 != worker2
+        }
+    name_list = [
+            worker.name 
+            for worker in workers
+        ]
     # comm_alive_dict = Manager().dict({(worker.name, other_worker.name): True if ((worker.id == (other_worker.id-1)) or (worker.id == (other_worker.id + 1))) and (worker.id != other_worker.id) == (other_worker.id+1) else False for worker in workers for other_worker in workers })
-    comm_alive_dict = Manager().dict()
+    worker_name_peer_2_comm_alive__share:Dict[Tuple[str,str],bool] = Manager().dict()
     agent_queue = Queue()
     NumAdj = 3
+    NumAdj = 5
     for worker in workers:
-        self_rel_dist = [[other, np.linalg.norm(worker.pose - other.pose)] for other in workers if worker != other]
-        soreted_worker_list = sorted(self_rel_dist, key=lambda x: x[1], reverse=False)
+        self_rel_dist = [
+                [other, np.linalg.norm(worker.pose - other.pose)] 
+                for other in workers 
+                if worker != other
+            ]
+        soreted_worker_list:List[List[Union[Worker, float]]] = sorted(self_rel_dist, key=lambda x: x[1], reverse=False)
         for i in range(len(soreted_worker_list)):
             if i < NumAdj:
-                comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = True
-                comm_alive_dict[(soreted_worker_list[i][0].name, worker.name)] = True
+                worker_name_peer_2_comm_alive__share[(worker.name, soreted_worker_list[i][0].name)] = True
+                worker_name_peer_2_comm_alive__share[(soreted_worker_list[i][0].name, worker.name)] = True
             else:
-                comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = False  
+                worker_name_peer_2_comm_alive__share[(worker.name, soreted_worker_list[i][0].name)] = False  
         
     # plot communication topology
     # plot_comm_topoloty(workers, comm_alive_dict)
 
-    consensus_list = Manager().list()
-    consensus_list.extend([0 for _ in range(len(workers))])
+    consensus_list__share = Manager().list()
+    consensus_list__share.extend([0 for _ in range(len(workers))])
     process_time_begin = datetime.datetime.now()
     
 
@@ -226,7 +283,18 @@ def multiprocess_queue():
     final_workers = []
     barrier = Barrier(num_worker)
     for i,worker in enumerate(workers):
-        p = Process(target=run_worker, args=(worker, queues, name_list, comm_alive_dict, consensus_list, agent_queue, barrier))
+        p = Process(
+                    target=run_worker, 
+                    args=(
+                        worker, 
+                        worker_name_peer_2_queues__share, 
+                        name_list, 
+                        worker_name_peer_2_comm_alive__share, 
+                        consensus_list__share, 
+                        agent_queue, 
+                        barrier
+                    )
+                )
         p.start()
         processes.append(p)
         
@@ -243,58 +311,59 @@ def multiprocess_queue():
     plot_agent_value(final_workers)
 
 
-def singleprocess():
-    global wifi
-    global comm_alive_dict
-    num_worker = 20
-    NumAdj = 3
-    np.random.seed(42)
-    # sleep_time = [random.randint(1,5) for _ in range(num_worker)]
-    sleep_time = [1, 2, 2, 2, 1, 1, 2, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2]
-    print(f"sleep time -------------------- {sleep_time}")
-    workers = [Worker(i+1, pose=np.random.rand(2)*MAP_SIZE, sleep_time=sleep_time[i]) for i in range(num_worker)]
-    wifi = {worker.name:[] for worker in workers}
-    comm_alive_dict = {}
-    for worker in workers:
-        self_rel_dist = [[other, np.linalg.norm(worker.pose - other.pose)] for other in workers if worker != other]
-        soreted_worker_list = sorted(self_rel_dist, key=lambda x: x[1], reverse=False)
-        for i in range(len(soreted_worker_list)):
-            if i < NumAdj:
-                comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = True
-                comm_alive_dict[(soreted_worker_list[i][0].name, worker.name)] = True
-            else:
-                comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = False  
+# def singleprocess():
+#     global wifi
+#     global comm_alive_dict
+#     num_worker = 20
+#     NumAdj = 3
+#     NumAdj = 20
+#     np.random.seed(42)
+#     # sleep_time = [random.randint(1,5) for _ in range(num_worker)]
+#     sleep_time = [1, 2, 2, 2, 1, 1, 2, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2]
+#     print(f"sleep time -------------------- {sleep_time}")
+#     workers = [Worker(i+1, pose=np.random.rand(2)*MAP_SIZE, sleep_time=sleep_time[i]) for i in range(num_worker)]
+#     wifi = {worker.name:[] for worker in workers}
+#     comm_alive_dict = {}
+#     for worker in workers:
+#         self_rel_dist = [[other, np.linalg.norm(worker.pose - other.pose)] for other in workers if worker != other]
+#         soreted_worker_list = sorted(self_rel_dist, key=lambda x: x[1], reverse=False)
+#         for i in range(len(soreted_worker_list)):
+#             if i < NumAdj:
+#                 comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = True
+#                 comm_alive_dict[(soreted_worker_list[i][0].name, worker.name)] = True
+#             else:
+#                 comm_alive_dict[(worker.name, soreted_worker_list[i][0].name)] = False  
     
 
-    # plot_comm_topoloty(workers, comm_alive_dict)
+#     # plot_comm_topoloty(workers, comm_alive_dict)
 
-    comm_iter = 0
-    # while comm_iter < max_iter:
+#     comm_iter = 0
+#     # while comm_iter < max_iter:
     
-    start_cal_time = datetime.datetime.now()
-    while True:
-        print("="*30)
-        print(f"comm iteration = {comm_iter}")
+#     start_cal_time = datetime.datetime.now()
+#     while True:
+#         print("="*30)
+#         print(f"comm iteration = {comm_iter}")
         
-        for worker in workers:
-          worker.send()
+#         for worker in workers:
+#             worker.send()
         
-        for worker in workers:
-            worker.receive()
+#         for worker in workers:
+#             worker.receive()
             
-        for worker in workers:
-            worker.cons(start_cal_time)
+#         for worker in workers:
+#             worker.cons(start_cal_time)
         
-        agent_comm_cost = [worker.comm_iter_list[-1] for worker in workers]
-        print(f"comm_iter: {comm_iter}, consensus value: {agent_comm_cost}\n")
-        if len(set(agent_comm_cost)) == 1:
-            end_single_time = datetime.datetime.now()
-            print(f">>>>>>>>>>>>>>>>> process time: {end_single_time - start_cal_time} <<<<<<<<<<<<<<<")
-            break
+#         agent_comm_cost = [worker.comm_iter_list[-1] for worker in workers]
+#         print(f"comm_iter: {comm_iter}, consensus value: {agent_comm_cost}\n")
+#         if len(set(agent_comm_cost)) == 1:
+#             end_single_time = datetime.datetime.now()
+#             print(f">>>>>>>>>>>>>>>>> process time: {end_single_time - start_cal_time} <<<<<<<<<<<<<<<")
+#             break
         
-        comm_iter += 1
+#         comm_iter += 1
     
-    plot_agent_value(workers)
+#     plot_agent_value(workers)
     
 
 if __name__ == "__main__":

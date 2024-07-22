@@ -24,6 +24,7 @@ class Worker:
         self.sleep_time     = sleep_time
         self.iknow_onot     = False
         self.iknow_oknow    = False
+        self.send_only_once = False
         
     def send_data(self, 
             msgs:int,

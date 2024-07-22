@@ -63,10 +63,13 @@ def run_worker(
             
             print('len(set(consensus_list__share)) == 1')
             print('consensus')
+            if self.only
+            
             if worker.iknow_oknow == True:
+                agent_queue.put(worker)
                 break
         
         comm_iter += 1
     
     # plot_agent_value(time_list, comm_iter_list)
-    agent_queue.put(worker)
+    # agent_queue.put(worker)

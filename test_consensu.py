@@ -16,8 +16,12 @@ from msg_log import save_msg_vol
 from process_job import run_worker
 
 
+# from share_entity import run_worker
 
-    
+
+
+
+
 
 
 
@@ -94,12 +98,15 @@ def multiprocess_create():
                 )
         p.start()
         processes.append(p)
-        
+
+    print('agent_queue.get() -------------------- s')
     for _ in range(num_worker):
         final_workers.append(agent_queue.get())
 
+    print('p.join() -------------------- s')
     for p in processes:
         p.join()
+    print('p.join() -------------------- e')
         
     process_time_end = datetime.datetime.now()
     
